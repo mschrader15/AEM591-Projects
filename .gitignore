@@ -1,3 +1,7 @@
+#
+alpaca-trade-api-python/* 
+alpaca.py
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
