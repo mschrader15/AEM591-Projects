@@ -51,66 +51,30 @@ class Plane:
         self.x0 = np.array(
             [250, 0, 0, 0, 0, 0, 0, 0]
         )
-        
-        self.augC = None
-    
-    def build_aug_matrixes(self, target_matrix: np.ndarray) -> np.ndarray:        
-        A = np.r_[np.c_[self.A, np.zeros(self.A.shape[0])], [[1, 0, 0, 0, 0, 0, 0, 0, 0]]]
-        B = np.r_[self.B, [[0] * self.B.shape[1]]]
-        C = np.eye(A.shape[0])
-        D = 0
 
-        Q = np.diag([10, 10, 10, 10, 10, 10, 10, 10, 10])
-        
-        K, _, _ = lqr(A, B, Q, self.R)
-
-        if target_matrix.shape[0] != B.shape[0]:
-            target_matrix = np.append(target_matrix, [0])
-
-        Aaug = A-B@K
-        Baug = B@K@target_matrix - target_matrix
-
-        _ss = StateSpace(Aaug, Baug.T, np.zeros(A.shape), 0)
-
-        return step(_ss, T=np.linspace(0, 10, 1000), X0=np.append(self.x0, [0]))
-
-    def K_rslqr(self, ) -> np.ndarray:
-        X = np.matrix(
-            la.solve_continuous_are(
-                self.augA, self.augB, self.augQ, self.R, e=None, balanced=True
-            )
-        )
-
-        self.augK = np.matrix(la.inv(self.R) @ (self.augB.T * X))
-
-        return self.augK
-
-
-    def optimal_f(self, target_matrix) -> object:
+    def optimal_f(self, time_vector: np.ndarray, target_states: List[np.ndarray], Q: np.ndarray, R: np.ndarray) -> object:
         
         A = np.r_[np.c_[self.A, np.zeros(self.A.shape[0])], [[1, 0, 0, 0, 0, 0, 0, 0, 0]]]
         B = np.r_[self.B, [[0] * self.B.shape[1]]]
-        C = np.eye(A.shape[0])
-        D = 0
-        Q = np.diag([10, 10, 10, 10, 10, 10, 10, 10, 10])
-        K, _, _ = lqr(A, B, Q, self.R)
+#         C = np.eye(A.shape[0])
+#         K, _, _ = lqr(A, B, Q, self.R)
+        K = self.design_lrq(A, B, Q, R)
 
-        if target_matrix.shape[0] != B.shape[0]:
-            target_matrix = np.append(target_matrix, [0])
-
+        if target_states[0].shape[0] != B.shape[0]:
+            target_states = [np.append(_t, [0]) for _t in target_states]
+            
+        # creating the target function
+        t_div = (time_vector[-1] - time_vector[0]) / len(target_states)
+        t_f = lambda t: target_states[int(t // t_div)]
+        
         Aaug = A-B@K
-        # Baug = B@K@target_matrix - target_matrix
-        Baug = - (target_matrix - np.append(self.x0, [0]))
+        X0 = np.append(self.x0, [0])
 
-        def f(t, x_t, wr):
-            # calling extra np array function here is dumb
-#             U = np.array(-1 * self.augK @ (x_t))[0]
-#             return self.augA @ x_t + (self.augB @ U.T)
-            return np.array(((Aaug @ (x_t - wr).T) + Baug))[0]
-            # return np.array((self.augA - self.augB @ self.augK) @ x_t.T + self.augC @ wr)[0]
-            # return np.array((self.augA - self.augB @ self.augK) @ x_t.T + self.augC @ wr)[0]
+        def f(t, x_t, ):
+            wr = t_f(t)
+            return np.array(((Aaug @ (x_t - wr).T) - (wr - X0)))[0]
+        
         return f
-
 
     def augA(self, ) -> np.ndarray:
         self.A
@@ -125,40 +89,33 @@ class Plane:
         return solve_ivp(self._f(), y0=self.x0, t_span=(t_vect[0], t_vect[-1]), max_step=Plane.MAX_STEP, args=(None, ))
 #         return lsim(self.ss, u_vect, t_vect, self.x0)
 
-    def simulate_controlled(self, t_vect: np.ndarray, wr: np.ndarray, K: np.ndarray = None) -> Tuple[np.ndarray]:
+    def simulate_controlled(self, time_vector: np.ndarray, *args, **kwargs) -> Tuple[np.ndarray]:
         # this is a bad practive but getting lazy
-        # self.augK = K
-        # initialize x0 with the error term
         augx0 = np.append(self.x0, [0])
-        # target 0 error
-        wr = np.append(wr, [0])
-        return solve_ivp(self.optimal_f(wr), y0=augx0, t_span=(t_vect[0], t_vect[-1]), max_step=Plane.MAX_STEP, args=(wr, ))
-        
-        # ss = StateSpace((self.augA - self.augB @ self.augK), np.matrix(self.augC).T, np.eye(self.augA.shape[0]), np.zeros(np.matrix(self.augC).T.shape))
-        return lsim(ss, np.array([wr.T for _ in t_vect]), t_vect, augx0)
-    
+        return solve_ivp(self.optimal_f(time_vector, *args, **kwargs), y0=augx0, t_span=(time_vector[0], time_vector[-1]), max_step=Plane.MAX_STEP)
+
     def _f(self, ):
         def f(t, x_t, wr):
             U = np.array(-1 * self.K @ (x_t - wr))[0] if wr is not None else np.array(self.step_function(t))
-#             print(U)
-#             x_t = x_t - self.x0
-            # solve_ivp doesn't like numpy matrices it seems
             return self.A @ x_t + (self.B @ U.T)
         return f
 
     def step_function(self, t: float):
         return self.U[int(t // ((self.T[-1] - self.T[0]) / len(self.U)))]
 
-    def design_lrq(self, ) -> None:
+    @staticmethod
+    def design_lrq(A, B, Q, R) -> None:
         X = np.matrix(
             la.solve_continuous_are(
-                self.A, self.B, self.Q, self.R, e=None, balanced=True)
+                A, B, Q, R, e=None, balanced=True)
         )
 
         # compute the LQR gain
-        self.K = np.matrix(la.inv(self.R) @ (self.B.T * X))
+        K = np.matrix(la.inv(R) @ (B.T@ X))
 
-        return self.K
+        eigVals, eigVecs = la.eig(A-B*K)
+
+        return K
 
     def control_lqr(self, ) -> np.ndarray:
         # This function is used as a check of my own LQR implementation
@@ -166,7 +123,8 @@ class Plane:
 
         return lqr(self.ss, self.Q, self.R)
 
-    def plot(self, t: np.ndarray, y: np.ndarray, u: np.ndarray, flat: bool = True) -> None:
+    @staticmethod
+    def plot(t: np.ndarray, y: np.ndarray, u: np.ndarray, flat: bool = True, target: tuple = None) -> None:
         fig = make_subplots(rows=5,
                             cols=1,
                             shared_xaxes=True,
@@ -182,8 +140,7 @@ class Plane:
         for j, (data, yaxis_title, inner_settings) in enumerate(
             [[y, "ft/s", [["u", 0]]],
              [y, "rad/s", [["q", 2], ["r", 6], ["p", 5]]],
-             [y, "rad", [["phi", 7], ["theta", 3], [
-                 "beta", 4], ["beta", 4], ["alpha", 4]]],
+             [y, "rad", [["phi", 7], ["theta", 3], ["beta", 4], ["alpha", 1]]],
              [u, "rad", [["elevator", 0], ["airlerons", 2], ["rudder", 3]]],
              [u, "lbs", [["thrust", 1]]],
              ]
@@ -197,6 +154,20 @@ class Plane:
                 ),
                     row=j + 1, col=1
                 )
+                
+                if target and j < 3:
+                    fig.add_trace(
+                        go.Scatter(
+                        x=target[0],
+                        y=[val[ind] for val in target[1]],
+                        line_color="black",
+                        line_dash="dash",
+                        name="Target",
+                        showlegend=j < 1 
+                    ),
+                    row=j + 1, 
+                    col=1,
+                )
 
             update_dict = {
                 f"yaxis{j+1}" if j > 0 else "yaxis": dict(title=yaxis_title)
@@ -208,6 +179,8 @@ class Plane:
 
         fig.show()
 
+
+
 if __name__ == "__main__":
 
     p = Plane()
@@ -215,8 +188,8 @@ if __name__ == "__main__":
     # p.build_aug_matrixes(np.array([260, 0, 0, 0, 0, 0, 0, 0, 0]))
 
     # K = p.design_lrq()
-    res = p.simulate_controlled(t_vect=np.linspace(0, 20, 100), wr=np.array([260, 0, 0, 0, 0, 0, 0, 0]))
-
+    res = p.simulate_controlled(time_vector=np.linspace(0, 20, 100), target_states=[np.array([250, 0, 0, 0, 0, 0, 0, 0])] * 20 +  [np.array([260, 0, 0, 0, 0, 0, 0, 0])] * 80, 
+    Q=np.diag([10] * 9), R=np.diag([20, 20, 20, 20]))
     # print(res)
 
     # u = np.array([[0, 0, 0, 0]] * 10 + [[0, 10, 0, 0]] * 90)
