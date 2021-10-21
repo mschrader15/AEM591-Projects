@@ -196,7 +196,7 @@ class EKF(LTI):
         K_k = P_priori @ H_j.T @ np.linalg.inv(S_k)
 
         # a posteriori mean estimate
-        x_k_k = x + (K_k @ y_k.T)
+        x_k_k = x.T + (K_k @ y_k.T)
 
         # P posteriori
         P_k_k = P_priori - K_k @ S_k @ K_k.T
@@ -205,7 +205,7 @@ class EKF(LTI):
         # return the states that we want to plot
         return EKFStep(x_k_k=x_k_k, y_k=y_k, P_k_k=P_k_k, S_k=S_k)
 
-    def run(self, ) -> List[EKFStep]:
+    def run(self, mode="") -> List[EKFStep]:
 
         # could also use recursion to do this
         results = []
@@ -218,34 +218,48 @@ class EKF(LTI):
             results.append(
                 self.update(x=x_k, )
             )
+            
+            if "silent" not in mode:
+                print(i)
+            
             i += 1
-            print(i)
 
         return results
 
 
 if __name__ == "__main__":
 
+    # import dubins
+
     rad_to_deg = 180 / math.pi
     R = 5  # given
-    dt = 0.01
-
+    step_size = 0.01 # to get roughly 5000 grid points
     q0 = (0, -15, -90 / rad_to_deg)
     q1 = (-5, 20, -180 / rad_to_deg)
-    turning_radius = R
-    step_size = dt
-
     path = dubins.shortest_path(q0, q1, R)
-    configurations, x = path.sample_many(step_size)
+    optimal_path, _ = path.sample_many(step_size)
 
+    # with open("dubins.csv", "w") as f:
+    #     f.writelines(
+    #         "\n".join(
+    #             (
+    #                 ",".join(map(str, p)) for p in [["X", "Y", "Theta"]] + optimal_path
+    #             ) 
+    #         )
+    #     )
+
+    # my code
+    dt = 0.5
     radar_1 = Radar(x=-15, y=-10, v=9)
     radar_2 = Radar(x=-15, y=5, v=9)
 
-    lti = LTI(s=1, s_var=0.05, dt=0.5,
-              x0=configurations[0], dubins_path=configurations, q1=q1)
-    lti.x_t_noise(x=[np.array([configurations[0]])], )
+    lti = LTI(s=1, s_var=0.05, dt=dt,
+            x0=optimal_path[0], dubins_path=optimal_path, q1=q1)
 
-    e = EKF(lti, R=np.diag([9 / rad_to_deg, 9 / rad_to_deg, 5 / rad_to_deg]),
+    lti.x_t_noise(x=[np.array([optimal_path[0]])], )
+
+    e = EKF(lti, 
+            R=np.diag([radar_1.v / (rad_to_deg ** 2), radar_2.v / (rad_to_deg ** 2), 5 / (rad_to_deg ** 2)]),
             Q=np.diag([0.05, 0.05, (1 / R) ** 2 * dt ** 2]), radars=(radar_1, radar_2))
 
     res = e.run()
