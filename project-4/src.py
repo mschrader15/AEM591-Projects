@@ -282,41 +282,4 @@ def confidence_ellipse(x, y, cov, n_std=1.96, size=100):
     return path
 
 
-if __name__ == "__main__":
 
-    # import dubins
-
-    rad_to_deg = 180 / math.pi
-    R = 5  # given
-    step_size = 0.01 # to get roughly 5000 grid points
-    q0 = (0, -15, -90 / rad_to_deg)
-    q1 = (-5, 20, -180 / rad_to_deg)
-    path = dubins.shortest_path(q0, q1, R)
-    optimal_path, _ = path.sample_many(step_size)
-
-    # with open("dubins.csv", "w") as f:
-    #     f.writelines(
-    #         "\n".join(
-    #             (
-    #                 ",".join(map(str, p)) for p in [["X", "Y", "Theta"]] + optimal_path
-    #             ) 
-    #         )
-    #     )
-
-    # my code
-    dt = 0.5
-    radar_1 = Radar(x=-15, y=-10, v=9)
-    radar_2 = Radar(x=-15, y=5, v=9)
-
-    lti = LTI(s=1, s_var=0.05, dt=dt,
-            x0=optimal_path[0], dubins_path=optimal_path, q1=q1)
-
-    lti.x_t_noise(x=[np.array([optimal_path[0]])], )
-
-    e = EKF(lti, 
-            R=np.diag([radar_1.v / (rad_to_deg ** 2), radar_2.v / (rad_to_deg ** 2), 5 / (rad_to_deg ** 2)]),
-            Q=np.diag([0.05, 0.05, (1 / R) ** 2 * dt ** 2]), radars=(radar_1, radar_2))
-
-    res = e.run()
-
-    res[0].S_k
