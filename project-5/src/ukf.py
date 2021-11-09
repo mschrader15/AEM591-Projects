@@ -58,7 +58,7 @@ class UKF(BaseFilter):
 
         # initialize the parent
         super().__init__(
-            *args, record_variables=['P_posteriori', 'P_priori', 'x'], **kwargs)
+            *args, record_variables=['P_posteriori', 'P_priori', 'x', 'K', 'y'], **kwargs)
 
         self.sp = sigma_obj
 
@@ -71,33 +71,35 @@ class UKF(BaseFilter):
         self.S = np.zeros((self._dim_y, self._dim_y))
         self.SI = np.zeros((self._dim_y, self._dim_y))
 
-    def _update(self, measurement: np.ndarray) -> None:
+    def _update(self, measurement: np.ndarray, hx_args: dict={}) -> None:
 
         # pass prior sigmas through h(x) to get measurement sigmas
         # the shape of sigmas_h will vary if the shape of z varies, so
         # recreate each time
         sigmas_h = []
         for s in self.sigmas_f:
-            sigmas_h.append(hx(s, **hx_args))
-
+            sigmas_h.append(self.hx(s, **hx_args))
 
         # Need to rework this to my format
         self.sigmas_h = np.atleast_2d(sigmas_h)
 
         # mean and covariance of prediction passed through unscented transform
-        zp, self.S = UT(self.sigmas_h, self.Wm, self.Wc, R, self.z_mean, self.residual_z)
-        self.SI = self.inv(self.S)
+        zp, S = self._unscented_transform(
+            self.sigmas_h,
+            self.R
+        )
 
         # compute cross variance of the state and the measurements
         Pxz = self.cross_variance(self.x, zp, self.sigmas_f, self.sigmas_h)
 
-
-        self.K = dot(Pxz, self.SI)        # Kalman gain
-        self.y = self.residual_z(z, zp)   # residual
+        # Kalman Filter Gain
+        self.K = np.dot(Pxz, np.linalg.inv(S))
+        # Calculate the residual
+        self.y = np.subtract(measurement, zp)
 
         # update Gaussian state estimate (x, P)
-        self.x = self.state_add(self.x, dot(self.K, self.y))
-        self.P = self.P - dot(self.K, dot(self.S, self.K.T))
+        self.x = self.state_add(self.x, np.dot(self.K, self.y))
+        self.P = self.P - np.dot(self.K, np.dot(self.S, self.K.T))
 
         # save measurement and posterior state
         self.z = deepcopy(z)
@@ -113,7 +115,8 @@ class UKF(BaseFilter):
         x, P_posteriori = self._unscented_transform(
             self._transform_sigma(
                 x
-            )
+            ),
+            self.Q
         )
 
         # update sigma points to reflect the new variance of the points
@@ -123,14 +126,33 @@ class UKF(BaseFilter):
         self.P_posteriori = P_posteriori.copy()
 
 
-    def _unscented_transform(self, sigma: np.ndarray) -> Tuple[np.ndarray, ]:
+    def _unscented_transform(self, sigma: np.ndarray, noise_cov: np.ndarray = None) -> Tuple[np.ndarray, ]:
 
         x = np.dot(self.sp.Wm, sigma)
         # np.newaxis is a clever way to add a dimension
         y = sigma - x[np.newaxis, :]
         P = np.dot(y.T, np.dot(np.diag(self.sp.Wc), y))
 
+        # add noise if it exists
+        P = P + noise_cov if noise_cov else P
+
         return x, P
+
+    def cross_variance(self, x, z, sigmas_f, sigmas_h):
+        """
+        Compute cross variance of the state `x` and measurement `z`.
+        """
+
+        Pxz = np.zeros((sigmas_f.shape[1], sigmas_h.shape[1]))
+        N = sigmas_f.shape[0]
+        
+        for i in range(N):
+            Pxz += self.Wc[i] * np.outer(
+                np.subtract(sigmas_f[i], x), 
+                np.subtract(sigmas_h[i], z)
+            )
+        
+        return Pxz
 
     def _transform_sigma(self, x: np.ndarray) -> np.array:
         raw_sigma = self.sp.calc(mu=x, cov=self.P_posteriori)
