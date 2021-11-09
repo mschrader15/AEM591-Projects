@@ -1,9 +1,11 @@
+import math
 from typing import Tuple
 
 import numpy as np
 from scipy.linalg import cholesky
 
 from .base import BaseFilter
+from .helpers import normalize_radians, RAD_2_DEGREE
 
 
 class SigmaPoints:
@@ -58,20 +60,45 @@ class UKF(BaseFilter):
 
         # initialize the parent
         super().__init__(
-            *args, record_variables=['P_posteriori', 'P_priori', 'x', 'K', 'y'], **kwargs)
+            *args, record_variables=['P_posteriori', 'P_priori', 'x_priori', 'x_mean', 'K', 'z_res', 'z_measure'], **kwargs)
 
         self.sp = sigma_obj
 
         self.sigmas_f = np.zeros((self.sp.size, self._dim_x))
         self.sigmas_h = np.zeros((self.sp.size, self._dim_y))
 
+        self.x_mean = np.zeros((self._dim_x))
+        self.x_priori = self.x_mean.copy()
+        self.x_posteriori = self.x_mean.copy()
+
         self.K = np.zeros((self._dim_x, self._dim_z))
-        self.y = np.zeros((self._dim_y))
-        self.z = np.array([[None] * self._dim_y]).T
+        self.z_res = np.zeros((self._dim_y))
+        self.z_measure = np.array([[None] * self._dim_y]).T
         self.S = np.zeros((self._dim_y, self._dim_y))
         self.SI = np.zeros((self._dim_y, self._dim_y))
 
-    def _update(self, measurement: np.ndarray, hx_args: dict={}) -> None:
+    def _predict(self, ) -> None:
+        x = self.x.copy()
+
+        # do the unscented transform on the sigma
+        x, P_priori = self._unscented_transform(
+            self._transform_sigma(
+                x
+            ),
+            angle_ind=(2, ),
+            noise_cov=self.Q
+        )
+
+        # update sigma points to reflect the new variance of the points
+        self.sigmas_f = self.sp.calc(x, P_priori)
+
+        # unsure as to why x and x_priori are set here
+        self.x_mean = x.copy()
+        self.x_priori = x.copy()
+
+        self.P_priori = P_priori.copy()
+
+    def _update(self, measurement: np.ndarray, hx_args: dict = {}) -> None:
 
         # pass prior sigmas through h(x) to get measurement sigmas
         # the shape of sigmas_h will vary if the shape of z varies, so
@@ -80,57 +107,40 @@ class UKF(BaseFilter):
         for s in self.sigmas_f:
             sigmas_h.append(self.hx(s, **hx_args))
 
-        # Need to rework this to my format
         self.sigmas_h = np.atleast_2d(sigmas_h)
 
-        # mean and covariance of prediction passed through unscented transform
         zp, S = self._unscented_transform(
             self.sigmas_h,
-            self.R
+            angle_ind=(0, 1, 2),
+            noise_cov=self.R
         )
 
-        # compute cross variance of the state and the measurements
-        Pxz = self.cross_variance(self.x, zp, self.sigmas_f, self.sigmas_h)
+        Pxz = self.cross_variance(
+            self.x_priori, zp, self.sigmas_f, self.sigmas_h)
 
-        # Kalman Filter Gain
         self.K = np.dot(Pxz, np.linalg.inv(S))
-        # Calculate the residual
-        self.y = np.subtract(measurement, zp)
+        self.z_res = np.subtract(measurement, zp)
 
-        # update Gaussian state estimate (x, P)
-        self.x = self.state_add(self.x, np.dot(self.K, self.y))
-        self.P = self.P - np.dot(self.K, np.dot(self.S, self.K.T))
+        x = self.np.add(self.x_priori, np.dot(self.K, self.y))
+        self.P_posteriori = self.P_priori - \
+            np.dot(self.K, np.dot(self.S, self.K.T))
 
         # save measurement and posterior state
-        self.z = deepcopy(z)
-        self.x_post = self.x.copy()
-        self.P_post = self.P.copy()
-
-
-    def _predict(self, ) -> None:
-        x = self.x.copy()
-
-
-        # do the unscented transform on the sigma
-        x, P_posteriori = self._unscented_transform(
-            self._transform_sigma(
-                x
-            ),
-            self.Q
-        )
-
-        # update sigma points to reflect the new variance of the points
-        self.sigmas_f = self.sp.calc(x, P_posteriori)
-
+        self.z_measure = measurement.copy()
         self.x = x.copy()
-        self.P_posteriori = P_posteriori.copy()
+        self.x_posteriori = x.copy()
 
+    def _unscented_transform(self, sigma: np.ndarray, angle_ind: tuple, noise_cov: np.ndarray = None) -> Tuple[np.ndarray, ]:
 
-    def _unscented_transform(self, sigma: np.ndarray, noise_cov: np.ndarray = None) -> Tuple[np.ndarray, ]:
-
-        x = np.dot(self.sp.Wm, sigma)
+        # x = np.dot(self.sp.Wm, sigma)
+        x = self._angle_mean(sigma, angle_ind)
         # np.newaxis is a clever way to add a dimension
         y = sigma - x[np.newaxis, :]
+
+        # normalize angles
+        for i in angle_ind:
+            y[i] = normalize_radians(y[i])
+
         P = np.dot(y.T, np.dot(np.diag(self.sp.Wc), y))
 
         # add noise if it exists
@@ -139,26 +149,69 @@ class UKF(BaseFilter):
         return x, P
 
     def cross_variance(self, x, z, sigmas_f, sigmas_h):
-        """
-        Compute cross variance of the state `x` and measurement `z`.
-        """
 
         Pxz = np.zeros((sigmas_f.shape[1], sigmas_h.shape[1]))
-        N = sigmas_f.shape[0]
-        
-        for i in range(N):
-            Pxz += self.Wc[i] * np.outer(
-                np.subtract(sigmas_f[i], x), 
+
+        for i in range(sigmas_f.shape[0]):
+            Pxz += self.sp.Wc[i] * np.outer(
+                np.subtract(sigmas_f[i], x),
                 np.subtract(sigmas_h[i], z)
             )
-        
+
         return Pxz
 
     def _transform_sigma(self, x: np.ndarray) -> np.array:
         raw_sigma = self.sp.calc(mu=x, cov=self.P_posteriori)
         return np.array(map(self.fx, raw_sigma))
 
+    def _angle_mean(self, sigmas: np.ndarray, angle_ind=(2, )) -> np.ndarray:
+        """
+        can't do a simple average because one of the states is an angle. 
+        using the arctan of sines and cosines method
+        This is annoyingly not general, as UKF doesn't know the position of the angles
+        """
+        x = np.zeros(sigmas.shape[1])
+
+        for i in angle_ind:
+            sin_sum = np.sum(np.dot(np.sin(sigmas[:, angle_ind]), self.sp.Wm))
+            cos_sum = np.sum(np.dot(np.cos(sigmas[:, angle_ind]), self.sp.Wm))
+            x[i] = math.atan2(sin_sum, cos_sum)
+
+        for i in range(sigmas.shape[1]):
+            if i not in angle_ind:
+                x[i] = np.sum(np.dot(sigmas[:, i], self.sp.Wm))
+
+        return x
+
 
 if __name__ == "__main__":
 
-    ukf = UKF()
+    """
+    For testing purposes
+    """
+
+    from .base import LTI, Radar, calculate_dubins
+
+    R = 5
+
+    optimal_path = calculate_dubins()
+
+    dt = 0.5
+    radar_1 = Radar(x=-15, y=-10, v=9)
+    radar_2 = Radar(x=-15, y=5, v=9)
+
+    lti = LTI(s=1, s_var=0.05, dt=dt,
+              x0=optimal_path[0], dubins_path=optimal_path, q1=q1)
+
+    lti.x_t_noise(x=[np.array([optimal_path[0]])], )
+
+    e = UKF(
+        lti,
+        R=np.diag([radar_1.v / (RAD_2_DEGREE ** 2), radar_2.v /
+                  (RAD_2_DEGREE ** 2), 5 / (RAD_2_DEGREE ** 2)]),
+        Q=np.diag([0.05, 0.05, (1 / R) ** 2 * dt ** 2]), 
+        radars=(radar_1, radar_2))
+
+    res = e.run()
+
+    res[0].S_k
