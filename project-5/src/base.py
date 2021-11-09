@@ -94,6 +94,7 @@ class LTI:
         return np.argmin(distance)
 
     def x_t_noise(self, x: float, i=0, ) -> np.ndarray:
+        
         while True:
             idx = self._find_nearest_dudin(
                 self.dubins_path, x[-1][0][0], x[-1][0][1])
@@ -113,7 +114,8 @@ class LTI:
             # recursion excursion
             return self.x_t_noise(x, i+1)
 
-        self.trajectory = x
+        # this is annoying but don't care to trace down the dimension issue
+        self.trajectory = [_x[0] for _x in x]
 
 
 @dataclass
@@ -139,14 +141,19 @@ class RecordableFilter:
             self.ss[key].append(self.__dict__[key])
 
     def _update(self, *args, **kwargs) -> None:
+        """
+        Just a placeholder
+        """
         pass
 
     def _predict(self, *args, **kwargs) -> None:
+        """
+        Just a placeholder
+        """
         pass
 
     def predict(self, *args, **kwargs) -> None:
         self._predict(*args, **kwargs)
-        self._record()
 
     def update(self, *args, **kwargs) -> None:
         self._update(*args, **kwargs)
@@ -174,8 +181,7 @@ class BaseFilter(RecordableFilter):
         # ---
         self.R = R.copy()
         self.Q = Q.copy()
-        self.R_func = multivariate_normal(mean=np.zeros_like(self.R), cov=self.R)
-
+        self.R_func = multivariate_normal(mean=np.zeros(self.R.shape[0]), cov=self.R)
         # ----
         self.I = np.eye(dim_x)
         self.P_posteriori = self.I.copy()
@@ -185,15 +191,15 @@ class BaseFilter(RecordableFilter):
     def run(self, lti: LTI, ) -> None:
 
         for i, x_pos in enumerate(lti.trajectory):
-
-            if i < 0:
+            
+            if i < 1:
                 self.x = x_pos  # initialize to the initial position
             
             # predict the state
             self.predict()
             
             # take a measurement given the position
-            measurement = lti.measure(*x_pos, self.R_func.rvs())
+            measurement = lti.measure(*x_pos, self.R_func.rvs())[0]
 
             # update the prediction given the measurement
             self.update(measurement)

@@ -3,9 +3,9 @@ from typing import List
 import numpy as np
 from scipy.stats import multivariate_normal
 
-from .base import LTI
-from .base import EKFStep
-from .base import Radar
+from base import LTI
+from base import EKFStep
+from base import Radar
 
 
 class EKF(LTI):
