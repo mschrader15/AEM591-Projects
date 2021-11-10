@@ -77,8 +77,8 @@ class LTI:
     def F(self, x: float, y: float, theta: float) -> np.ndarray:
         return self._M_eval(self.A_j, **{'x': x, 'y': y, 'theta': theta, 's': self.s, 'dt': self.d_t})
 
-    def H(self, x: float, x1: float, y: float, y1: float, x2: float, y2: float, theta: float) -> np.ndarray:
-        return self._M_eval(self.C_j, x=x, x_1=x1, y=y, y_1=y1, x_2=x2, y_2=y2, theta=theta)
+    def H(self, x: float, y: float, theta: float) -> np.ndarray:
+        return self._M_eval(self.C_j, x=x, x_1=self.radar_1.x, y=y, y_1=self.radar_1.y, x_2=self.radar_2.x, y_2=self.radar_2.y, theta=theta)
 
     def f(self, x: float, y: float, theta: float, s: float = None) -> np.ndarray:
         return self._M_eval(self.A, **{'x': x, 'y': y, 'theta': theta, 's': s or self.s, 'dt': self.d_t})
@@ -88,17 +88,23 @@ class LTI:
         return self.f(x, y, theta)
 
     @staticmethod
-    def _find_nearest_dudin(dubin_path: list, x: float, y: float) -> int:
+    def _find_nearest_dubin(dubin_path: list, x: float, y: float) -> int:
         distance = [((_p[0] - x) ** 2 + (_p[1] - y) ** 2) ** (1/2)
                     for _p in dubin_path]
         return np.argmin(distance)
 
-    def x_t_noise(self, x: float, i=0, ) -> np.ndarray:
-        
+    def x_t_noise(self, x: list, ) -> np.ndarray:
+
         while True:
-            idx = self._find_nearest_dudin(
-                self.dubins_path, x[-1][0][0], x[-1][0][1])
+
+            idx = self._find_nearest_dubin(
+                self.dubins_path,
+                x[-1][0][0],
+                x[-1][0][1]
+            )
+
             du = self.dubins_path[idx][2]
+
             # why 2? Because that seems to end closet to the actual end
             if idx >= (len(self.dubins_path) - 2):
                 break
@@ -111,20 +117,9 @@ class LTI:
                     s=self.S_func.rvs()
                 ).T
             )
-            # recursion excursion
-            return self.x_t_noise(x, i+1)
 
         # this is annoying but don't care to trace down the dimension issue
         self.trajectory = [_x[0] for _x in x]
-
-
-@dataclass
-class EKFStep:
-    x_k_k: np.ndarray
-    y_k: np.ndarray
-    P_k_k: np.ndarray
-    P_k_k_1: np.ndarray
-    S_k: np.ndarray
 
 
 class RecordableFilter:
@@ -181,7 +176,8 @@ class BaseFilter(RecordableFilter):
         # ---
         self.R = R.copy()
         self.Q = Q.copy()
-        self.R_func = multivariate_normal(mean=np.zeros(self.R.shape[0]), cov=self.R)
+        self.R_func = multivariate_normal(
+            mean=np.zeros(self.R.shape[0]), cov=self.R)
         # ----
         self.I = np.eye(dim_x)
         self.P_posteriori = self.I.copy()
@@ -191,17 +187,15 @@ class BaseFilter(RecordableFilter):
     def run(self, lti: LTI, ) -> None:
 
         for i, x_pos in enumerate(lti.trajectory):
-            
+
             if i < 1:
                 self.x = x_pos  # initialize to the initial position
-            
+
             # predict the state
             self.predict()
-            
+
             # take a measurement given the position
             measurement = lti.measure(*x_pos, self.R_func.rvs())[0]
 
             # update the prediction given the measurement
             self.update(measurement)
-
-            

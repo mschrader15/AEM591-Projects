@@ -4,8 +4,13 @@ from typing import Tuple
 import numpy as np
 from scipy.linalg import cholesky
 
-from base import BaseFilter
-from helpers import normalize_radians, RAD_2_DEGREE
+try:
+    from base import BaseFilter
+    from helpers import normalize_radians, RAD_2_DEGREE
+except ModuleNotFoundError:
+    # For the stupid jupyter format
+    from .base import BaseFilter
+    from .helpers import normalize_radians, RAD_2_DEGREE
 
 
 class SigmaPoints:
@@ -60,7 +65,7 @@ class UKF(BaseFilter):
 
         # initialize the parent
         super().__init__(
-            *args, record_variables=['P_posteriori', 'P_priori', 'x_priori', 'x_mean', 'K', 'z_res', 'z_measure'], **kwargs)
+            *args, record_variables=['P_posteriori', 'P_priori', 'x_priori', 'x', 'K', 'z_res', 'z_measure', 'x_posteriori'], **kwargs)
 
         self.sp = sigma_obj
 
@@ -78,12 +83,13 @@ class UKF(BaseFilter):
         # self.SI = np.zeros((self._dim_y, self._dim_y))
 
     def _predict(self, ) -> None:
+        
         x = self.x.copy()
 
         sigma = self.sp.calc(mu=x, cov=self.P_posteriori)
         sigma_f = np.zeros_like(sigma)
         for i, s in enumerate(sigma):
-            sigma_f[i, :] = self.fx(*s)[0]
+            sigma_f[i, :] = self.fx(*s).T[0]
         
         # do the unscented transform on the sigma
         x, P_priori = self._unscented_transform(
@@ -211,6 +217,9 @@ if __name__ == "__main__":
               radar_2=radar_2)
 
     lti.x_t_noise(x=[np.array([optimal_path[0]])], )
+
+    lti.trajectory = \
+        [np.array((x[0], x[1], normalize_radians(x[2]),)) for x in lti.trajectory] 
 
     # Create the Sigma Point Object
     sp = SigmaPoints(dim=lti.A.shape[0], alpha=0.0001, beta=2, kappa=0)

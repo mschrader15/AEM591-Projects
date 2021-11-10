@@ -1,11 +1,24 @@
 from typing import List 
+from dataclasses import dataclass
 
 import numpy as np
 from scipy.stats import multivariate_normal
 
-from base import LTI
-from base import EKFStep
-from base import Radar
+try:
+    from base import LTI
+    from base import Radar
+except ModuleNotFoundError:
+    # For the stupid jupyter format
+    from .base import LTI, Radar
+
+
+@dataclass
+class EKFStep:
+    x_k_k: np.ndarray
+    y_k: np.ndarray
+    P_k_k: np.ndarray
+    P_k_k_1: np.ndarray
+    S_k: np.ndarray
 
 
 class EKF(LTI):
@@ -48,13 +61,11 @@ class EKF(LTI):
 
     def update(self, x, *args, **kwargs) -> EKFStep:
 
-        # x = self.step_car(iter_)
-        state = dict(x=x[0][0], y=x[0][1], x1=self.radars[0].x, x2=self.radars[1].x,
-                     y1=self.radars[0].y, y2=self.radars[1].y, theta=x[0][2])
+        state = dict(x=x[0], y=x[1], theta=x[2])
 
         y_act = self.measure(**state, noise_matrix=self.R_func.rvs())
 
-        F_j = self.F(*list(x[0]), **kwargs)
+        F_j = self.F(*list(x), **kwargs)
 
         H_j = self.H(**state)
 
@@ -71,7 +82,7 @@ class EKF(LTI):
         K_k = P_priori @ H_j.T @ np.linalg.inv(S_k)
 
         # a posteriori mean estimate
-        x_k_k = x.T + (K_k @ y_k.T)
+        x_k_k = x[:, np.newaxis]  + (K_k @ y_k.T)
 
         # P posteriori
         P_k_k = P_priori - K_k @ S_k @ K_k.T
@@ -101,3 +112,43 @@ class EKF(LTI):
 
         return results
 
+
+if __name__ == "__main__":
+
+    """
+    For testing purposes
+    """
+
+    from base import LTI, Radar
+    from helpers import calculate_dubins
+    from helpers import normalize_radians, RAD_2_DEGREE
+    
+    R_path = 5
+
+    optimal_path = calculate_dubins()
+
+    dt = 0.5
+    radar_1 = Radar(x=-15, y=-10, v=9)
+    radar_2 = Radar(x=-15, y=5, v=9)
+
+    lti = LTI(s=1, 
+              s_var=0.05, 
+              dt=dt,
+              x0=optimal_path[0], 
+              dubins_path=optimal_path, 
+              q1=(-5, 20, -180), 
+              radar_1=radar_1, 
+              radar_2=radar_2)
+
+    lti.x_t_noise(x=[np.array([optimal_path[0]])], )
+
+    lti.trajectory = [np.array((x[0], x[1], normalize_radians(x[2]),)) for x in lti.trajectory] 
+
+    R = np.diag([radar_1.v / (RAD_2_DEGREE ** 2), radar_2.v / (RAD_2_DEGREE ** 2), 5 / (RAD_2_DEGREE ** 2)])
+    Q = np.diag([0.05, 0.05, (1 / R_path) ** 2 * dt ** 2])
+
+    ekf = EKF(lti, R=R, Q=Q, radars=(radar_1, radar_2))
+    res = ekf.run("silent")
+
+    res[0].x_k_k
+    # res[0].S_k
