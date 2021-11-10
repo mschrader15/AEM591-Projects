@@ -198,4 +198,4 @@ class BaseFilter(RecordableFilter):
             measurement = lti.measure(*x_pos, self.R_func.rvs())[0]
 
             # update the prediction given the measurement
-            self.update(measurement)
+            self.update(measurement, hx_args={"noise_matrix": self.R_func.rvs()})
