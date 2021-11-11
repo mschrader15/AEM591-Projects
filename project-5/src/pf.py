@@ -36,6 +36,10 @@ class PF(BaseFilter):
         self.mean_x = None
         self.mean_var = None
 
+        # roughen divisor
+        temp = np.arange(1, self._num_p + 1)
+        self._roughen_d = np.c_[temp.copy(), temp.copy(), temp.copy()]
+
     def _update(self, measurement, *args, **kwargs) -> None:
         # computing the normalized weights
         for i, prediction in enumerate(self._state_predict):
@@ -61,32 +65,29 @@ class PF(BaseFilter):
         self._roughen_particles()
         
     def _predict(self, *args, **kwargs) -> None:
-        # predict and roughen
+        # predict
         for i, state_p_row in enumerate(self.state_p):
             self._state_predict[i, :] = self.fx(*state_p_row, noise_matrix=self.Q_func.rvs())
             self._state_predict[i, 2] = normalize_radians(self._state_predict[i, 2])
 
     def _resample_particles(self, ) -> None:
-        # trying the simpler algo
         cumsum_ = np.cumsum(self.weights_p)
-        for i, _ in enumerate(self._state_predict):
-            r = np.random.rand()
-            for j, _sum in enumerate(cumsum_):
-                if _sum > r:
-                    break
-            self.state_p[i] = self._state_predict[j]
+        # binary search
+        idxs = np.searchsorted(cumsum_, np.random.rand(cumsum_.shape[0]))
+        self.state_p = self._state_predict[idxs]
 
     def _reset_weights(self, ):
         self.weights_p = 1 / self._num_p * np.ones(self._num_p)
 
     def _estimate(self, ):
         mean = np.average(self.state_p, axis=0, weights=self.weights_p)
+        mean[2] = self._average_angles(self.state_p[:, 2], self.weights_p)
         var = np.var(self.state_p, axis=0)  # weights=self.weights_p, axis=0)
         return mean, var
 
     def _roughen_particles(self, ):
         max_diff = abs(np.max(self.state_p, 0) - np.min(self.state_p, 0))
-        self.state_p += np.sqrt(self._alpha * max_diff / self._num_p) * np.random.randn(self._num_p, self._dim_x)
+        self.state_p += np.sqrt(self._alpha * max_diff / self._roughen_d) * np.random.randn(self._num_p, self._dim_x)
 
     @staticmethod
     def _create_gaussian_particles(mean, std, N):
@@ -95,6 +96,12 @@ class PF(BaseFilter):
         particles[:, 1] = mean[1] + (np.random.randn(N) * std[1])
         particles[:, 2] = mean[2] + (np.random.randn(N) * std[2])
         return particles
+
+    @staticmethod
+    def _average_angles(angles, weights):
+        sin_sum = np.sum(np.sin(angles) * weights)
+        cos_sum = np.sum(np.cos(angles) * weights)
+        return normalize_radians(np.arctan2(sin_sum, cos_sum))
 
 
 if __name__ == "__main__":
