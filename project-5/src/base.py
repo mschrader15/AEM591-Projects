@@ -1,3 +1,4 @@
+import math
 from typing import Callable
 from dataclasses import dataclass
 
@@ -15,10 +16,14 @@ class Radar:
 
 
 class LTI:
+    """
+    This beast needs a refractor 
+    """
 
     def __init__(self, s: float, dt: float, x0: tuple, dubins_path: list, q1: tuple, radar_1: Radar, radar_2: Radar, s_var: float = None, ):
 
-        self.dubins_path = dubins_path
+        # cast dubins to np array for faster math 
+        self.dubins_path = np.array(dubins_path)
         self.q1 = q1
         self.s = s
         self.d_t = dt
@@ -72,7 +77,8 @@ class LTI:
                                x_2=self.radar_2.x, y_2=self.radar_2.y, theta=theta).T
         noise = np.zeros_like(
             measure) if noise_matrix is None else noise_matrix
-        return measure + noise
+        # a sympy dimesion issue here
+        return (measure + noise)[0]
 
     def F(self, x: float, y: float, theta: float) -> np.ndarray:
         return self._M_eval(self.A_j, **{'x': x, 'y': y, 'theta': theta, 's': self.s, 'dt': self.d_t})
@@ -80,46 +86,76 @@ class LTI:
     def H(self, x: float, y: float, theta: float) -> np.ndarray:
         return self._M_eval(self.C_j, x=x, x_1=self.radar_1.x, y=y, y_1=self.radar_1.y, x_2=self.radar_2.x, y_2=self.radar_2.y, theta=theta)
 
-    def f(self, x: float, y: float, theta: float, s: float = None) -> np.ndarray:
-        return self._M_eval(self.A, **{'x': x, 'y': y, 'theta': theta, 's': s or self.s, 'dt': self.d_t})
+    def f(self, x: float, y: float, theta: float, s: float = None, noise_matrix: np.array = None) -> np.ndarray:
+        # s = self.s + noise_matrix[0] if noise_matrix is not None else self.s
+        if noise_matrix is not None:
+            theta += noise_matrix[2]
+            s = self.s + noise_matrix[0]
+        # indexing below solves sympy dimension issue
+        return self._M_eval(self.A, **{'x': x, 'y': y, 'theta': theta, 's': s or self.s, 'dt': self.d_t})[0]
+
+    def f_fast(self, x: float, y: float, theta: float, s: float = None, noise_matrix: np.array = None) -> np.ndarray:
+        
+        if noise_matrix is not None:
+            s = self.s + noise_matrix[0]
+        else:
+            s = s or self.s
+
+
+        return np.array(
+            [
+                x + self.d_t * s * np.cos(theta),
+                y + self.d_t * s * np.sin(theta),
+                theta + noise_matrix[2] if noise_matrix is not None else theta,
+            ]
+        )
+    
+    def measure_fast(self, x: float, y: float, theta: float, noise_matrix: np.array = None) -> np.ndarray:
+        measure = np.array([
+            math.atan2((y - self.radar_1.y), (x - self.radar_1.x)),
+            math.atan2((y - self.radar_2.y), (x - self.radar_2.x)),
+            theta
+        ])
+        noise = np.zeros_like(measure) if noise_matrix is None else noise_matrix
+        return measure + noise
 
     def x_t(self, x: float, y: float, theta: float) -> np.ndarray:
         """ Legacy Function Name"""
         return self.f(x, y, theta)
 
-    @staticmethod
-    def _find_nearest_dubin(dubin_path: list, x: float, y: float) -> int:
-        distance = [((_p[0] - x) ** 2 + (_p[1] - y) ** 2) ** (1/2)
-                    for _p in dubin_path]
-        return np.argmin(distance)
+    
+    def _find_nearest_dubin(self, x: float, y: float, last_idx: int = 0) -> int:
+        distance = np.hypot(self.dubins_path[last_idx:, 0] - x, self.dubins_path[last_idx:, 1] - y)
+        return np.argmin(distance) + last_idx
 
     def x_t_noise(self, x: list, ) -> np.ndarray:
+        
+        idx = 0
 
         while True:
 
             idx = self._find_nearest_dubin(
-                self.dubins_path,
-                x[-1][0][0],
-                x[-1][0][1]
+                x[-1][0],
+                x[-1][1],
+                idx
             )
 
-            du = self.dubins_path[idx][2]
+            du = self.dubins_path[idx, 2]
 
             # why 2? Because that seems to end closet to the actual end
             if idx >= (len(self.dubins_path) - 2):
                 break
 
             x.append(
-                self.f(
-                    x=x[-1][0][0],
-                    y=x[-1][0][1],
+                self.f_fast(
+                    x=x[-1][0],
+                    y=x[-1][1],
                     theta=du,
                     s=self.S_func.rvs()
                 ).T
             )
 
-        # this is annoying but don't care to trace down the dimension issue
-        self.trajectory = [_x[0] for _x in x]
+        self.trajectory = x
 
 
 class RecordableFilter:
@@ -178,13 +214,15 @@ class BaseFilter(RecordableFilter):
         self.Q = Q.copy()
         self.R_func = multivariate_normal(
             mean=np.zeros(self.R.shape[0]), cov=self.R)
+        self.Q_func = multivariate_normal(
+            mean=np.zeros(self.Q.shape[0]), cov=self.Q)
         # ----
         self.I = np.eye(dim_x)
         self.P_posteriori = self.I.copy()
         self.P_priori = self.I.copy()
         self.K = np.zeros((dim_x, dim_y))
 
-    def run(self, lti: LTI, ) -> None:
+    def run(self, lti: LTI, measurements: list = None) -> None:
 
         for i, x_pos in enumerate(lti.trajectory):
 
@@ -195,7 +233,8 @@ class BaseFilter(RecordableFilter):
             self.predict()
 
             # take a measurement given the position
-            measurement = lti.measure(*x_pos, self.R_func.rvs())[0]
+            measurement = lti.measure(*x_pos, self.R_func.rvs()) \
+                if measurements is None else measurements[i]
 
             # update the prediction given the measurement
-            self.update(measurement, hx_args={"noise_matrix": self.R_func.rvs()})
+            self.update(measurement, )

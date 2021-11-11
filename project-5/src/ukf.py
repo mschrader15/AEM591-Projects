@@ -89,7 +89,8 @@ class UKF(BaseFilter):
         sigma = self.sp.calc(mu=x, cov=self.P_posteriori)
         sigma_f = np.zeros_like(sigma)
         for i, s in enumerate(sigma):
-            sigma_f[i, :] = self.fx(*s).T[0]
+            # sigma_f[i, :] = self.fx(*s, noise_matrix=self.Q_func.rvs()).T[0]
+            sigma_f[i, :] = self.fx(*s, )
         
         # do the unscented transform on the sigma
         x, P_priori = self._unscented_transform(
@@ -107,14 +108,14 @@ class UKF(BaseFilter):
 
         self.P_priori = P_priori.copy()
 
-    def _update(self, measurement: np.ndarray, hx_args: dict = {}) -> None:
+    def _update(self, measurement: np.ndarray, *args, **kwargs) -> None:
 
         # pass prior sigmas through h(x) to get measurement sigmas
         # the shape of sigmas_h will vary if the shape of z varies, so
         # recreate each time
         sigmas_h = np.zeros_like(self.sigmas_f)
         for i, s in enumerate(self.sigmas_f):
-            sigmas_h[i, :] = self.hx(*s, **hx_args)
+            sigmas_h[i, :] = self.hx(*s, )  # noise_matrix=self.R_func.rvs())
 
         zp, S = self._unscented_transform(
             sigmas_h,
@@ -216,7 +217,7 @@ if __name__ == "__main__":
               radar_1=radar_1, 
               radar_2=radar_2)
 
-    lti.x_t_noise(x=[np.array([optimal_path[0]])], )
+    lti.x_t_noise(x=[np.array(optimal_path[0])], )
 
     lti.trajectory = \
         [np.array((x[0], x[1], normalize_radians(x[2]),)) for x in lti.trajectory] 
@@ -232,8 +233,8 @@ if __name__ == "__main__":
         R=np.diag([radar_1.v / (RAD_2_DEGREE ** 2), radar_2.v /
                   (RAD_2_DEGREE ** 2), 5 / (RAD_2_DEGREE ** 2)]),
         Q=np.diag([0.05, 0.05, (1 / R) ** 2 * dt ** 2]), 
-        fx=lti.f,
-        hx=lti.measure
+        fx=lti.f_fast,
+        hx=lti.measure_fast
         )
 
     ukf.P_posteriori = np.diag([.1, .1, .1])

@@ -1,4 +1,4 @@
-from typing import List 
+from typing import List
 from dataclasses import dataclass
 
 import numpy as np
@@ -24,7 +24,7 @@ class EKFStep:
 class EKF(LTI):
 
     def __init__(self, lti: LTI, R: np.ndarray, Q: np.ndarray, radars: List[Radar, ]) -> None:
-        
+
         # lets me initialize super with an already instantated class
         self.__dict__.update(lti.__dict__)
 
@@ -47,11 +47,15 @@ class EKF(LTI):
         self.Q = Q
 
         # create a noise function
-        self.R_func = multivariate_normal(mean=np.zeros(self.R.shape[0]), cov=self.R)
+        self.R_func = multivariate_normal(
+            mean=np.zeros(self.R.shape[0]), cov=self.R)
 
         # Gain Matrices
         self.L = np.eye(self.Q.shape[0])
         self.M = np.eye(self.R.shape[0])
+
+        # create a holder for the results
+        self.results = []
 
     def step_car(self, i):
         try:
@@ -59,11 +63,11 @@ class EKF(LTI):
         except IndexError:
             return
 
-    def update(self, x, *args, **kwargs) -> EKFStep:
+    def update(self, x, measurement, *args, **kwargs) -> EKFStep:
 
         state = dict(x=x[0], y=x[1], theta=x[2])
 
-        y_act = self.measure(**state, noise_matrix=self.R_func.rvs())
+        y_act = measurement  # self.measure(**state, noise_matrix=self.R_func.rvs())
 
         F_j = self.F(*list(x), **kwargs)
 
@@ -82,7 +86,7 @@ class EKF(LTI):
         K_k = P_priori @ H_j.T @ np.linalg.inv(S_k)
 
         # a posteriori mean estimate
-        x_k_k = x[:, np.newaxis]  + (K_k @ y_k.T)
+        x_k_k = x[:, np.newaxis] + (K_k @ y_k.T)
 
         # P posteriori
         P_k_k = P_priori - K_k @ S_k @ K_k.T
@@ -91,26 +95,29 @@ class EKF(LTI):
         # return the states that we want to plot
         return EKFStep(x_k_k=x_k_k, y_k=y_k, P_k_k=P_k_k, S_k=S_k, P_k_k_1=P_priori)
 
-    def run(self, mode="") -> List[EKFStep]:
+    def run(self, measurements: list = None, *args, **kwargs) -> List[EKFStep]:
 
         # could also use recursion to do this
         results = []
         i = 0
         while True:
             x_k = self.step_car(i)
+
             if x_k is None:
                 break
 
+            measurement = self.measure_fast(*x_k,
+                                            noise_matrix=self.R_func.rvs()) \
+                    if measurements is None else measurements[i]
+
             results.append(
-                self.update(x=x_k, )
+                self.update(x=x_k, measurement=measurement)
             )
-            
-            if "silent" not in mode:
-                print(i)
-            
+
             i += 1
 
-        return results
+        self.results = results
+        # return results
 
 
 if __name__ == "__main__":
@@ -122,7 +129,7 @@ if __name__ == "__main__":
     from base import LTI, Radar
     from helpers import calculate_dubins
     from helpers import normalize_radians, RAD_2_DEGREE
-    
+
     R_path = 5
 
     optimal_path = calculate_dubins()
@@ -131,20 +138,22 @@ if __name__ == "__main__":
     radar_1 = Radar(x=-15, y=-10, v=9)
     radar_2 = Radar(x=-15, y=5, v=9)
 
-    lti = LTI(s=1, 
-              s_var=0.05, 
+    lti = LTI(s=1,
+              s_var=0.05,
               dt=dt,
-              x0=optimal_path[0], 
-              dubins_path=optimal_path, 
-              q1=(-5, 20, -180), 
-              radar_1=radar_1, 
+              x0=optimal_path[0],
+              dubins_path=optimal_path,
+              q1=(-5, 20, -180),
+              radar_1=radar_1,
               radar_2=radar_2)
 
     lti.x_t_noise(x=[np.array([optimal_path[0]])], )
 
-    lti.trajectory = [np.array((x[0], x[1], normalize_radians(x[2]),)) for x in lti.trajectory] 
+    lti.trajectory = [np.array((x[0], x[1], normalize_radians(x[2]),))
+                      for x in lti.trajectory]
 
-    R = np.diag([radar_1.v / (RAD_2_DEGREE ** 2), radar_2.v / (RAD_2_DEGREE ** 2), 5 / (RAD_2_DEGREE ** 2)])
+    R = np.diag([radar_1.v / (RAD_2_DEGREE ** 2), radar_2.v /
+                (RAD_2_DEGREE ** 2), 5 / (RAD_2_DEGREE ** 2)])
     Q = np.diag([0.05, 0.05, (1 / R_path) ** 2 * dt ** 2])
 
     ekf = EKF(lti, R=R, Q=Q, radars=(radar_1, radar_2))
