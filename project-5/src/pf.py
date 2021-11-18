@@ -43,7 +43,6 @@ class PF(BaseFilter):
         )
         self.weights_p = np.ones(self._num_p) / self._num_p
 
-        self._state_predict = np.zeros_like(self.state_p)
         self._state_measure = np.zeros_like(self.state_p)
         # for storing the variables
         self.mean_x = None
@@ -55,7 +54,7 @@ class PF(BaseFilter):
 
     def _update(self, measurement, *args, **kwargs) -> None:
         # computing the normalized weights
-        for i, prediction in enumerate(self._state_predict):
+        for i, prediction in enumerate(self.state_p):
             p_measure = self.hx(
                 *prediction,
             )
@@ -66,28 +65,28 @@ class PF(BaseFilter):
             measurement
         )
         self.weights_p *= np.prod(weights, 1)
-        # self.weights_p += 1.e-300
+        
         self.weights_p /= sum(self.weights_p)
-
-        # resample the particles
-        self._resample_particles()
 
         # calculate the mean
         self.mean_x, self.mean_var = self._estimate()
 
-        # reset the weights
+        # if self._neff() > self._num_p / 2:
+            # Only resample the particles if not enough effective particles
+        self._resample_particles()
+        
         self._reset_weights()
 
-        # roughen the particles
         self._roughen_particles()
 
     def _predict(self, *args, **kwargs) -> None:
         # predict
         for i, state_p_row in enumerate(self.state_p):
-            self._state_predict[i, :] = self.fx(
-                *state_p_row, noise_matrix=self.Q_func.rvs()
+            self.state_p[i, :] = self.fx(
+                *state_p_row, 
+                noise_matrix=self.Q_func.rvs()
             )
-            self._state_predict[i, 2] = normalize_radians(self._state_predict[i, 2])
+            self.state_p[i, 2] = normalize_radians(self.state_p[i, 2])
 
     def _resample_particles(
         self,
@@ -95,7 +94,7 @@ class PF(BaseFilter):
         cumsum_ = np.cumsum(self.weights_p)
         # binary search
         idxs = np.searchsorted(cumsum_, np.random.rand(cumsum_.shape[0]))
-        self.state_p = self._state_predict[idxs]
+        self.state_p = self.state_p[idxs].copy()
 
     def _reset_weights(
         self,
@@ -178,7 +177,7 @@ if __name__ == "__main__":
 
     pf = PF(
         num_p=1000,
-        alpha=0.02,
+        alpha=10,
         x0=lti.x0,
         dim_x=lti.A.shape[0],
         dim_y=lti.C.shape[0],

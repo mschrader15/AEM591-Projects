@@ -2,6 +2,10 @@
 .DS_Store
 .virtual_documents/
 
+# pyre
+.pyre_configuration
+.watchmanconfig
+
 #
 alpaca-trade-api-python/* 
 alpaca.py
