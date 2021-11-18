@@ -1,12 +1,11 @@
-from typing import List
 from dataclasses import dataclass
+from typing import List
 
 import numpy as np
 from scipy.stats import multivariate_normal
 
 try:
-    from base import LTI
-    from base import Radar
+    from base import LTI, Radar
 except ModuleNotFoundError:
     # For the stupid jupyter format
     from .base import LTI, Radar
@@ -22,8 +21,15 @@ class EKFStep:
 
 
 class EKF(LTI):
-
-    def __init__(self, lti: LTI, R: np.ndarray, Q: np.ndarray, radars: List[Radar, ]) -> None:
+    def __init__(
+        self,
+        lti: LTI,
+        R: np.ndarray,
+        Q: np.ndarray,
+        radars: List[
+            Radar,
+        ],
+    ) -> None:
 
         # lets me initialize super with an already instantated class
         self.__dict__.update(lti.__dict__)
@@ -47,8 +53,7 @@ class EKF(LTI):
         self.Q = Q
 
         # create a noise function
-        self.R_func = multivariate_normal(
-            mean=np.zeros(self.R.shape[0]), cov=self.R)
+        self.R_func = multivariate_normal(mean=np.zeros(self.R.shape[0]), cov=self.R)
 
         # Gain Matrices
         self.L = np.eye(self.Q.shape[0])
@@ -65,7 +70,9 @@ class EKF(LTI):
 
     def update(self, x, measurement, *args, **kwargs) -> EKFStep:
 
-        state = self.f_fast(*self.x, )  #dict(x=x[0], y=x[1], theta=x[2])
+        state = self.f_fast(
+            *self.x,
+        )  # dict(x=x[0], y=x[1], theta=x[2])
 
         y_act = measurement  # self.measure(**state, noise_matrix=self.R_func.rvs())
 
@@ -108,13 +115,13 @@ class EKF(LTI):
             if x_k is None:
                 break
 
-            measurement = self.measure_fast(*x_k,
-                                            noise_matrix=self.R_func.rvs()) \
-                    if measurements is None else measurements[i]
-
-            results.append(
-                self.update(x=x_k, measurement=measurement)
+            measurement = (
+                self.measure_fast(*x_k, noise_matrix=self.R_func.rvs())
+                if measurements is None
+                else measurements[i]
             )
+
+            results.append(self.update(x=x_k, measurement=measurement))
 
             i += 1
 
@@ -129,8 +136,7 @@ if __name__ == "__main__":
     """
 
     from base import LTI, Radar
-    from helpers import calculate_dubins
-    from helpers import normalize_radians, RAD_2_DEGREE
+    from helpers import RAD_2_DEGREE, calculate_dubins, normalize_radians
 
     R_path = 5
 
@@ -140,22 +146,39 @@ if __name__ == "__main__":
     radar_1 = Radar(x=-15, y=-10, v=9)
     radar_2 = Radar(x=-15, y=5, v=9)
 
-    lti = LTI(s=1, 
-          s_var=0.05, 
-          dt=0.5,
-          x0=optimal_path[0], 
-          dubins_path=optimal_path, 
-          q1=(-5, 20, -180), 
-          radar_1=radar_1, 
-          radar_2=radar_2)
+    lti = LTI(
+        s=1,
+        s_var=0.05,
+        dt=0.5,
+        x0=optimal_path[0],
+        dubins_path=optimal_path,
+        q1=(-5, 20, -180),
+        radar_1=radar_1,
+        radar_2=radar_2,
+    )
 
-    lti.x_t_noise(x=[np.array(optimal_path[0])], )
+    lti.x_t_noise(
+        x=[np.array(optimal_path[0])],
+    )
 
-    lti.trajectory = [np.array((x[0], x[1], normalize_radians(x[2]),))
-                      for x in lti.trajectory]
+    lti.trajectory = [
+        np.array(
+            (
+                x[0],
+                x[1],
+                normalize_radians(x[2]),
+            )
+        )
+        for x in lti.trajectory
+    ]
 
-    R = np.diag([radar_1.v / (RAD_2_DEGREE ** 2), radar_2.v /
-                (RAD_2_DEGREE ** 2), 5 / (RAD_2_DEGREE ** 2)])
+    R = np.diag(
+        [
+            radar_1.v / (RAD_2_DEGREE ** 2),
+            radar_2.v / (RAD_2_DEGREE ** 2),
+            5 / (RAD_2_DEGREE ** 2),
+        ]
+    )
     Q = np.diag([0.05, 0.05, (1 / R_path) ** 2 * dt ** 2])
 
     ekf = EKF(lti, R=R, Q=Q, radars=(radar_1, radar_2))

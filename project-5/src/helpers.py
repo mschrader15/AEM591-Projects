@@ -6,7 +6,12 @@ import numpy as np
 RAD_2_DEGREE = 180 / math.pi
 
 
-def calculate_dubins(x0: tuple = (0, -15, -90), x1: tuple = (-5, 20, -180), r: int = 5, step_size: float = 0.01) -> list:
+def calculate_dubins(
+    x0: tuple = (0, -15, -90),
+    x1: tuple = (-5, 20, -180),
+    r: int = 5,
+    step_size: float = 0.01,
+) -> list:
     import dubins
 
     x0 = (*x0[:-1], x0[-1] / RAD_2_DEGREE)
@@ -58,7 +63,8 @@ def confidence_ellipse(x, y, cov, n_std=1.96, size=100):
     ell_radius_y = np.sqrt(1 - pearson)
     theta = np.linspace(0, 2 * np.pi, size)
     ellipse_coords = np.column_stack(
-        [ell_radius_x * np.cos(theta), ell_radius_y * np.sin(theta)])
+        [ell_radius_x * np.cos(theta), ell_radius_y * np.sin(theta)]
+    )
 
     # Calculating the stdandard deviation of x from
     # the squareroot of the variance and multiplying
@@ -70,17 +76,20 @@ def confidence_ellipse(x, y, cov, n_std=1.96, size=100):
     y_scale = np.sqrt(cov[1, 1]) * n_std
     y_mean = np.mean(y)
 
-    translation_matrix = np.tile(
-        [x_mean, y_mean], (ellipse_coords.shape[0], 1))
-    rotation_matrix = np.array([[np.cos(np.pi / 4), np.sin(np.pi / 4)],
-                                [-np.sin(np.pi / 4), np.cos(np.pi / 4)]])
-    scale_matrix = np.array([[x_scale, 0],
-                            [0, y_scale]])
-    ellipse_coords = ellipse_coords.dot(rotation_matrix).dot(
-        scale_matrix) + translation_matrix
+    translation_matrix = np.tile([x_mean, y_mean], (ellipse_coords.shape[0], 1))
+    rotation_matrix = np.array(
+        [
+            [np.cos(np.pi / 4), np.sin(np.pi / 4)],
+            [-np.sin(np.pi / 4), np.cos(np.pi / 4)],
+        ]
+    )
+    scale_matrix = np.array([[x_scale, 0], [0, y_scale]])
+    ellipse_coords = (
+        ellipse_coords.dot(rotation_matrix).dot(scale_matrix) + translation_matrix
+    )
 
-    path = f'M {ellipse_coords[0, 0]}, {ellipse_coords[0, 1]}'
+    path = f"M {ellipse_coords[0, 0]}, {ellipse_coords[0, 1]}"
     for k in range(1, len(ellipse_coords)):
-        path += f'L{ellipse_coords[k, 0]}, {ellipse_coords[k, 1]}'
-    path += ' Z'
+        path += f"L{ellipse_coords[k, 0]}, {ellipse_coords[k, 1]}"
+    path += " Z"
     return path
