@@ -30,7 +30,7 @@ class LTI:
         radar_1: Radar,
         radar_2: Radar,
         s_var: float = None,
-    ):
+    ) -> None:
 
         # cast dubins to np array for faster math
         self.dubins_path = np.array(dubins_path)

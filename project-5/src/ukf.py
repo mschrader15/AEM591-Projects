@@ -200,7 +200,7 @@ class UKF(BaseFilter):
 
         return Pxz
 
-    def _angle_mean(self, sigmas: np.ndarray, angle_ind=(2,)) -> np.ndarray:
+    def _angle_mean(self, sigmas: np.ndarray, angle_ind: Tuple[int]=(2,)) -> np.ndarray:
         """
         can't do a simple average because one of the states is an angle.
         using the arctan of sines and cosines method

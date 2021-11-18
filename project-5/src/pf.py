@@ -99,7 +99,7 @@ class PF(BaseFilter):
 
     def _reset_weights(
         self,
-    ):
+    ) -> None:
         self.weights_p = 1 / self._num_p * np.ones(self._num_p)
 
     def _estimate(
@@ -112,7 +112,7 @@ class PF(BaseFilter):
 
     def _roughen_particles(
         self,
-    ):
+    ) -> None:
         max_diff = abs(np.max(self.state_p, 0) - np.min(self.state_p, 0))
         self.state_p += np.sqrt(
             self._alpha * max_diff / self._roughen_d

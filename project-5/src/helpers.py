@@ -3,7 +3,7 @@ from typing import List, Union
 
 import numpy as np
 
-RAD_2_DEGREE = 180 / math.pi
+RAD_2_DEGREE: float = 180 / math.pi
 
 
 def calculate_dubins(
@@ -32,7 +32,7 @@ def normalize_radians(x: Union[List, float]) -> Union[List, float]:
         return x
 
 
-def confidence_ellipse(x, y, cov, n_std=1.96, size=100):
+def confidence_ellipse(x, y, cov, n_std: float=1.96, size: int=100) -> str:
     """
     Largely from https://gist.github.com/dpfoose/38ca2f5aee2aea175ecc6e599ca6e973
 
