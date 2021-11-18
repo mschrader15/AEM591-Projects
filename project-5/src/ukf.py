@@ -79,6 +79,8 @@ class UKF(BaseFilter):
         self.K = np.zeros((self._dim_x, self._dim_y))
         self.z_res = np.zeros((self._dim_y))
         self.z_measure = np.array([[None] * self._dim_y]).T
+
+        self.P_posteriori = np.diag([1, ] * self._dim_x)
         # self.S = np.zeros((self._dim_y, self._dim_y))
         # self.SI = np.zeros((self._dim_y, self._dim_y))
 
